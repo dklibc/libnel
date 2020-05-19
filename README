@@ -13,6 +13,12 @@ netlink.
 * libnel-route -- based on libnel. Implements API
 for interfaces and ip management.
 
+* libnel-genl -- based on libnel, helper library.
+Implements API to generic netlink.
+
+* libnel-80211 -- based libnel-genl. Implemets API
+for management Wi-Fi/802.11.
+
 To debug define environment variable NLOG_DEBUG.
 
 For testing libnel-route we've created a simple cmdline util 'ip':
@@ -22,3 +28,7 @@ Options: -d -- log level info, -d2 -- log level debug
   $ ip link set IFACE up|down
   $ ip addr [show [IFACE]]
   $ ip addr add|del IFACE ADDR/BITS
+
+For testing libnl-80211 we've created a simple cmdline util 'iw':
+Usage: iw [options] [iface]
+Options: -d -- log level info, -d2 --log level debug

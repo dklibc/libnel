@@ -4,16 +4,19 @@ INC_DIR="$(DESTDIR)/include"
 
 .PHONY: clean all
 
-all: ip libs
+all: ip iw libs
 
 ip: ip.o nlcore.o nlroute.o nlog.o
+	$(CC) $(LDFLAGS) -o $@ $^
+
+iw: genlcore.o iw.o nl80211.o nlcore.o nlroute.o nlog.o
 	$(CC) $(LDFLAGS) -o $@ $^
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c -fPIC -o $@ $^
 
 clean:
-	rm -f ip *.o *.a *.so 2>/dev/null
+	rm ip iw *.o *.a *.so
 
 libnel.so: nlcore.o nlog.o
 	$(CC) -o $@ $^ -fPIC -shared
