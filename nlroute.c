@@ -446,3 +446,27 @@ struct nlr_addr *nlr_get_addr(int iface_idx, int *err)
 
 	return priv.addr;
 }
+
+/* Iface must be down? */
+int nlr_set_mac_addr(int iface_idx, char addr[6])
+{
+	char buf[128], *p;
+	struct ifinfomsg ifi;
+
+	memset(buf, 0, sizeof(buf));
+
+	p = nlmsg_put_hdr(buf, RTM_SETLINK, NLM_F_REQUEST|NLM_F_ACK);
+
+	memset(&ifi, 0, sizeof(ifi));
+
+	ifi.ifi_index = iface_idx;
+
+	p = add_hdr(p, &ifi, sizeof(ifi));
+
+	p = add_rta(p, IFLA_ADDRESS, 6, addr);
+
+	if (nl_send_msg(&nlsock, buf, p - buf))
+		return -1;
+
+	return nl_wait_ack(&nlsock);
+}

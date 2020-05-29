@@ -18,7 +18,7 @@ enum nlr_iface_type {
 struct nlr_iface {
 	int idx;
 	char *name;
-	unsigned char mac[6];
+	unsigned char addr[6];
 	int mtu;
 	enum nlr_iface_type type;
 	int is_up;
@@ -57,5 +57,7 @@ int nlr_set_iface(int iface_idx, int up);
 
 #define NLR_IFACE_UP(idx) nlr_set_iface(idx, 1)
 #define NLR_IFACE_DOWN(idx) nlr_set_iface(idx, 0)
+
+int nlr_set_mac_addr(int iface_idx, char addr[6]);
 
 #endif

@@ -17,6 +17,21 @@ static int set_iface(const char *name, int up)
 	return nlr_set_iface(idx, up);
 }
 
+static int set_iface_addr(const char *name, const char * s_addr)
+{
+	int idx;
+	unsigned char addr[6];
+
+	idx = nlr_iface_idx(name);
+	if (idx < 0)
+		return -1;
+
+	sscanf(s_addr, "%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx",
+	       &addr[0], &addr[1], &addr[2], &addr[3], &addr[4], &addr[5]);
+
+	return nlr_set_mac_addr(idx, addr);
+}
+
 static int manage_addr(const char *iface, const char *s_addr,
 		       int (*f)(int, in_addr_t, int))
 {
@@ -128,15 +143,18 @@ static int get_iface_info(const char *iface_name)
 		       "         mtu: %d\n"
 		       "       state: %s\n"
 		       "     carrier: %s\n"
+		       "        addr: %02x:%02x:%02x:%02x:%02x:%02x\n"
 		       "    tx_bytes: %ld\n"
 		       "  tx_packets: %ld\n"
 		       "    rx_bytes: %ld\n"
 		       "  rx_packets: %ld\n",
 		       p->name, p->idx, nlr_iface_type2str(p->type),
 		       p->mtu, p->is_up ? "Up" : "Down",
-		       p->carrier_on ? "Yes" : "No", p->stats.tx_bytes,
-		       p->stats.tx_packets, p->stats.rx_bytes,
-		       p->stats.rx_packets
+		       p->carrier_on ? "Yes" : "No",
+		       p->addr[0], p->addr[1], p->addr[2],
+		       p->addr[3], p->addr[4], p->addr[5],
+		       p->stats.tx_bytes, p->stats.tx_packets,
+		       p->stats.rx_bytes, p->stats.rx_packets
 		);
 	}
 
@@ -147,12 +165,14 @@ static int get_iface_info(const char *iface_name)
 
 static void help(void)
 {
-	printf("\nUsage: OPTIONS OBJECT CMD CMD_OPTIONS\n"
-	       " Options: -d -- log level info, -d2 -- log level debug\n"
-	       "  * link show [IFACE]\n"
-	       "  * link set IFACE up|down\n"
-	       "  * addr show [IFACE]\n"
-	       "  * addr add|del IFACE ADDR/BITS\n"
+	printf("\nUsage: [OPTIONS] OBJECT CMD [CMD_OPTIONS]" \
+	       "\nOptions: -d -- log level info, -d2 -- debug, -h -- help" \
+	       "\n$ ip link [show [IFACE]]" \
+	       "\n$ ip link set IFACE up|down"
+	       "\n$ ip link set IFACE addr hh:hh:hh:hh:hh:hh" \
+	       "\n$ ip addr [show [IFACE]]" \
+	       "\n$ ip addr add|del IFACE ADDR/BITS" \
+	       "\n"
 	);
 }
 
@@ -164,11 +184,13 @@ enum object {
 
 enum cmd {
 	CMD_INVAL,
-	CMD_SHOW,
-	CMD_SET_UP,
-	CMD_SET_DOWN,
-	CMD_ADD,
-	CMD_DEL,
+	CMD_LINK_SHOW,
+	CMD_LINK_SET_UP,
+	CMD_LINK_SET_DOWN,
+	CMD_LINK_SET_ADDR,
+	CMD_ADDR_ADD,
+	CMD_ADDR_DEL,
+	CMD_ADDR_SHOW,
 };
 
 int main(int argc, char *argv[])
@@ -179,9 +201,9 @@ int main(int argc, char *argv[])
 	enum object obj = OBJECT_INVAL;
 	const char *addr;
 
-	if (!argv[1]) {
+	if (!argv[1] || !strcmp(argv[1], "-h")) {
 		help();
-		goto fin;
+		return 0;
 	}
 
 	i = 1;
@@ -204,18 +226,22 @@ int main(int argc, char *argv[])
 		obj = OBJECT_LINK;
 		i++;
 		if (!argv[i]) {
-			cmd = CMD_SHOW;
+			cmd = CMD_LINK_SHOW;
 			iface = NULL;
 		} else if (!strcmp(argv[i], "show")) {
-			cmd = CMD_SHOW;
+			cmd = CMD_LINK_SHOW;
 			iface = argv[i + 1];
 		} else if (!strcmp(argv[i], "set")) {
 			iface = argv[++i];
 			if (iface && argv[++i]) {
 				if (!strcmp(argv[i], "up"))
-					cmd = CMD_SET_UP;
+					cmd = CMD_LINK_SET_UP;
 				else if (!strcmp(argv[i], "down"))
-					cmd = CMD_SET_DOWN;
+					cmd = CMD_LINK_SET_DOWN;
+				else if (!strcmp(argv[i], "addr")) {
+					cmd = CMD_LINK_SET_ADDR;
+					addr = argv[++i];
+				}
 			}
 		}
 	} else if (!strcmp(argv[i], "addr")) {
@@ -223,18 +249,18 @@ int main(int argc, char *argv[])
 		i++;
 		if (argv[i]) {
 			if (!strcmp(argv[i], "show")) {
-				cmd = CMD_SHOW;
+				cmd = CMD_ADDR_SHOW;
 				iface = argv[i + 1];
 			} else if (!strcmp(argv[i], "add")) {
 				iface = argv[++i];
 				if (iface && argv[++i]) {
-					cmd = CMD_ADD;
+					cmd = CMD_ADDR_ADD;
 					addr = argv[i];
 				}
 			} else if (!strcmp(argv[i], "del")) {
 				iface = argv[++i];
 				if (iface && argv[++i]) {
-					cmd = CMD_DEL;
+					cmd = CMD_ADDR_DEL;
 					addr = argv[i];
 				}
 			}
@@ -254,25 +280,33 @@ int main(int argc, char *argv[])
 
 	if (obj == OBJECT_LINK) {
 		switch (cmd) {
-			case CMD_SHOW:
+			case CMD_LINK_SHOW:
 				r = get_iface_info(iface);
 				break;
-			case CMD_SET_UP:
+
+			case CMD_LINK_SET_UP:
 				r = set_iface(iface, 1);
 				break;
-			case CMD_SET_DOWN:
+
+			case CMD_LINK_SET_DOWN:
 				r = set_iface(iface, 0);
+				break;
+
+			case CMD_LINK_SET_ADDR:
+				r = set_iface_addr(iface, addr);
 				break;
 		}
 	} else if (obj == OBJECT_ADDR) {
 		switch (cmd) {
-			case CMD_ADD:
+			case CMD_ADDR_ADD:
 				r = add_addr(iface, addr);
 				break;
-			case CMD_DEL:
+
+			case CMD_ADDR_DEL:
 				r = del_addr(iface, addr);
 				break;
-			case CMD_SHOW:
+
+			case CMD_ADDR_SHOW:
 				r = get_addr(iface);
 				break;
 		}
