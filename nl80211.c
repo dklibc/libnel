@@ -164,3 +164,56 @@ struct nl80211_iface *nl80211_iface(int iface_idx, int *err)
 
 	return priv.iface;
 }
+
+/*
+ * Possible type values: NL80211_IFTYPE_AP, NL80211_IFTYPE_STATION, ...
+ * The first phy has wiphy=0. Return iface idx.
+ */
+struct nl80211_iface *nl80211_create_iface(int wiphy,
+					   const char *name,
+					   int type)
+{
+	char buf[128], *p;
+	struct iface_cb_priv priv;
+
+	memset(buf, 0, sizeof(buf));
+	p = nlmsg_put_hdr(buf, nl80211_id, NLM_F_REQUEST | NLM_F_ACK);
+	p = genlmsg_put_hdr(p, NL80211_CMD_NEW_INTERFACE);
+	p = genlmsg_add_nla(p, NL80211_ATTR_WIPHY, 4, &wiphy);
+	p = genlmsg_add_nla(p, NL80211_ATTR_IFTYPE, 4, &type);
+	p = genlmsg_add_nla(p, NL80211_ATTR_IFNAME, strlen(name) + 1,
+			    (char *)name);
+
+	if (nl_send_msg(&nlsock, buf, p - buf))
+		return NULL;
+
+	priv.iface = NULL;
+	priv.err = 0;
+	priv.idx = -1;
+	if (nl_recv_msg(&nlsock, nl80211_id, iface_cb, &priv))
+		return NULL;
+
+	if (priv.err) {
+		nl80211_iface_free(priv.iface);
+		return NULL;
+	}
+
+	nl_wait_ack(&nlsock);
+
+	return priv.iface;
+}
+
+int nl80211_del_iface(int iface_idx)
+{
+	char buf[128], *p;
+
+	memset(buf, 0, sizeof(buf));
+	p = nlmsg_put_hdr(buf, nl80211_id, NLM_F_REQUEST | NLM_F_ACK);
+	p = genlmsg_put_hdr(p, NL80211_CMD_DEL_INTERFACE);
+	p = genlmsg_add_nla(p, NL80211_ATTR_IFINDEX, 4, &iface_idx);
+
+	if (nl_send_msg(&nlsock, buf, p - buf))
+		return -1;
+
+	return nl_wait_ack(&nlsock);
+}

@@ -42,11 +42,42 @@ static int iface_info(const char *name)
 	return err;
 }
 
+static int add_ap(const char *ifname)
+{
+	struct nl80211_iface *iface;
+
+	iface = NL80211_CREATE_AP(ifname);
+
+	if (!iface)
+		return -1;
+
+	nl80211_iface_free(iface);
+
+	return 0;
+}
+
+static int del_ap(const char *ifname)
+{
+	int idx;
+
+	idx = nlr_iface_idx(ifname);
+	if (idx < 0) {
+		printf("Failed to get iface idx\n");
+		return -1;
+	}
+
+	return nl80211_del_iface(idx);
+}
+
 static void help(void)
 {
-	printf("\nUtil for managing Wi-Fi.\n\n"
-	       " Usage: [options] [iface]\n"
-	       " Options: -d -- log level info, -d2 --log level debug\n"
+	printf("\nUtil for managing Wi-Fi.\n" \
+	       "\nUsage: [options] cmd [cmd-args]" \
+	       "\nOptions: -d -- log level info, -d2 --log level debug, -h -- help" \
+	       "\n  $ iw [show [IFNAME]]" \
+	       "\n  $ iw add ap IFNAME" \
+	       "\n  $ iw del iface IFNAME" \
+	       "\n" \
 	);
 }
 
@@ -62,6 +93,9 @@ int main(int argc, char *argv[])
 			logmask |= LOG_MASK(LOG_INFO) |
 				LOG_MASK(LOG_DEBUG);
 			i++;
+		} else if (!strcmp(argv[1], "-h")) {
+			help();
+			return 0;
 		}
 	}
 
@@ -71,7 +105,56 @@ int main(int argc, char *argv[])
 	if (nl80211_init() || nlr_init())
 		goto fin;
 
-	r = iface_info(argv[i]);
+	if (!argv[i]) {
+
+		r = iface_info(argv[i]);
+
+	} else if (!strcmp(argv[i], "show")) {
+
+		r = iface_info(argv[i + 1]);
+
+	} else if (!strcmp(argv[i], "add")) {
+
+		if (!argv[i + 1] || strcmp(argv[i + 1], "ap")) {
+			printf("Expected 'ap', get '%s'\n", argv[i + 1]);
+			goto help;
+		}
+
+		if (!argv[i + 2]) {
+			printf("Missing iface name\n");
+			goto help;
+		}
+
+		if (argv[i + 3]) {
+			printf("Too many args\n");
+			goto help;
+		}
+
+		r = add_ap(argv[i + 2]);
+	} else if (!strcmp(argv[i], "del")) {
+
+		if (!argv[i + 1] || strcmp(argv[i + 1], "iface")) {
+			printf("Expected 'iface', get '%s'\n",
+			       argv[i + 1]);
+			goto help;
+		}
+
+		if (!argv[i + 2]) {
+			printf("Missing iface name\n");
+			goto help;
+		}
+
+		if (argv[i + 3]) {
+			printf("Too many args\n");
+			goto help;
+		}
+
+		r = del_ap(argv[i + 2]);
+
+	} else {
+		printf("Unknown command.\n");
+		goto help;
+	}
 
 fin:
 	nl80211_fin();
@@ -81,4 +164,8 @@ fin:
 	printf("%s\n", r ? "Failed" : "OK");
 
 	return r;
+
+help:
+	help();
+	goto fin;
 }
