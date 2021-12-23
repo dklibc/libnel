@@ -19,17 +19,31 @@
 #include "nlog.h"
 
 static struct nl_sock nlsock;
+static int nlr_initialized;
 
 int nlr_init(void)
 {
+	if (nlr_initialized)
+		return 0;
+
 	nlog_init();
 
-	return nl_open(&nlsock, NETLINK_ROUTE);
+	if (nl_open(&nlsock, NETLINK_ROUTE))
+		return -1;
+
+	nlr_initialized = 1;
+
+	return 0;
 }
 
 void nlr_fin(void)
 {
+	if (!nlr_initialized)
+		return;
+
 	nl_close(&nlsock);
+
+	nlr_initialized = 0;
 }
 
 static char *add_hdr(char *p, void *hdr, int len)
