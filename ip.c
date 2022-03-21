@@ -17,14 +17,18 @@ static int set_iface(const char *name, int up)
 	return nlr_set_iface(idx, up);
 }
 
+#define IFACE_IDX_FAILED(ifname) printf("Failed to determine index of \"%s\" iface\n", ifname);
+
 static int set_iface_addr(const char *name, const char * s_addr)
 {
 	int idx;
 	unsigned char addr[6];
 
 	idx = nlr_iface_idx(name);
-	if (idx < 0)
+	if (idx < 0) {
+		IFACE_IDX_FAILED(name);
 		return -1;
+	}
 
 	sscanf(s_addr, "%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx",
 	       &addr[0], &addr[1], &addr[2], &addr[3], &addr[4], &addr[5]);
@@ -55,7 +59,7 @@ static int manage_addr(const char *iface, const char *s_addr,
 
 	iface_idx = nlr_iface_idx(iface);
 	if (iface_idx < 0) {
-		printf("Failed to determine iface index of '%s', not found?\n", iface);
+		IFACE_IDX_FAILED(iface);
 		return -1;
 	}
 
@@ -83,7 +87,7 @@ static int get_addr(const char *iface)
 	if (iface) {
 		iface_idx = nlr_iface_idx(iface);
 		if (iface_idx < 0) {
-			printf("Failed to determine idx of %s\n", iface);
+			IFACE_IDX_FAILED(iface);
 			return -1;
 		}
 	}
@@ -128,8 +132,7 @@ static int get_iface_info(const char *iface_name)
 	if (iface_name) {
 		iface_idx = nlr_iface_idx(iface_name);
 		if (iface_idx < 0) {
-			printf("Failed to determine idx of %s\n",
-			       iface_name);
+			IFACE_IDX_FAILED(iface_name);
 			return -1;
 		}
 	}
