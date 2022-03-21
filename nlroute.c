@@ -3,6 +3,11 @@
  * of only one interface. Kernel always returns addresses of all interfaces.
  * The same is true when you try to get info about the specified interface.
  * Programs depend on this bug, so it will never be fixed.
+ *
+ * The same thing with get routes: kernel doesn't do filtering at all.
+ * See https://patchwork.ozlabs.org/project/netdev/patch/1325080915.26559.43.camel@hakki
+ *
+ * So, you should do filtering in the userland.
  */
 
 #include <stdio.h>
@@ -238,7 +243,7 @@ static int iface_cb(struct nlmsghdr *nlhdr, void *_priv)
 		} else if (rta->rta_type == IFLA_MTU) {
 			iface->mtu = *(int *)RTA_DATA(rta);
 		} else if (rta->rta_type == IFLA_ADDRESS) {
-			memcpy(iface->mac, RTA_DATA(rta), 6);
+			memcpy(iface->addr, RTA_DATA(rta), 6);
 		} else if (rta->rta_type == IFLA_STATS) {
 			stats = (struct rtnl_link_stats *)RTA_DATA(rta);
 			iface->stats.tx_bytes = stats->tx_bytes;
@@ -483,4 +488,219 @@ int nlr_set_mac_addr(int iface_idx, char addr[6])
 		return -1;
 
 	return nl_wait_ack(&nlsock);
+}
+
+void nlr_free_routes(struct nlr_route *r)
+{
+	struct nlr_route *q;
+
+	while (r) {
+		q = r->pnext;
+		free(r);
+		r = q;
+	}
+}
+
+struct route_cb_priv {
+	struct nlr_route *route, *end;
+	int err;
+};
+
+/*
+https://man7.org/linux/man-pages/man7/rtnetlink.7.html
+*/
+static int route_cb(struct nlmsghdr *nlhdr, void *_priv)
+{
+	struct route_cb_priv *priv = (struct route_cb_priv *)_priv;
+	struct rtmsg *r;
+	struct rtattr *rta;
+	int n;
+	struct nlr_route *p;
+
+	if (!nlhdr || priv->err)
+		return 0;
+
+	r = NLMSG_DATA(nlhdr);
+
+	if (r->rtm_family != AF_INET)
+		return 0;
+
+	p = calloc(sizeof(*p), 1);
+	if (!p) {
+		priv->err = 1;
+		return 0;
+	}
+	p->pnext = NULL;
+	if (priv->end) {
+		priv->end->pnext = p;
+	} else {
+		priv->route = p;
+	}
+	priv->end = p;
+
+	p->table = r->rtm_table;
+	p->type = r->rtm_type;
+	p->scope = r->rtm_scope;
+	p->proto = r->rtm_protocol;
+	p->flags = r->rtm_flags;
+
+	for (rta = RTM_RTA(r), n = RTM_PAYLOAD(nlhdr);
+	     RTA_OK(rta, n); rta = RTA_NEXT(rta, n)) {
+		switch(rta->rta_type) {
+		case RTA_GATEWAY:
+			p->gw = *(in_addr_t *)RTA_DATA(rta);
+			break;
+		case RTA_PRIORITY: /* metrics */
+			p->metrics = *(uint32_t *)RTA_DATA(rta);
+			break;
+		case RTA_PREFSRC:
+			p->prefsrc = *(in_addr_t *)RTA_DATA(rta);
+			break;
+		case RTA_METRICS: /* not used */
+			break;
+		case RTA_DST:
+			p->dest = *(in_addr_t *)RTA_DATA(rta);
+			p->dest_plen = r->rtm_dst_len;
+			break;
+		case RTA_TABLE: /* Equals to r->rtm_table? */
+			break;
+		case RTA_OIF: /* Output interface */
+			p->oif = *(int *)RTA_DATA(rta);
+			break;
+		default:
+			break;
+		}
+	}
+
+	return 0;
+}
+
+struct nlr_route *nlr_get_routes(struct nlr_route *filter, int *err)
+{
+	char buf[64], *p;
+	struct rtmsg r;
+	struct route_cb_priv priv;
+	struct nlr_route *prev, *q;
+
+	if (err)
+		*err = -1;
+
+	memset(buf, 0, sizeof(buf));
+
+	p = nlmsg_put_hdr(buf, RTM_GETROUTE, NLM_F_DUMP);
+
+	memset(&r, 0, sizeof(r));
+	r.rtm_family = AF_INET;
+
+	p = add_hdr(p, &r, sizeof(r));
+
+	if (filter) {
+		/* Kernel doesn't do filtering at all :( */
+		/*
+		if (filter->table >= 0) {
+			p = add_rta(p, RTA_TABLE, 4, &filter->table);
+			r.rtm_table = filter->table;
+		}
+		if (filter->type >= 0)
+			r.rtm_type = filter->type;
+		if (filter->scope >= 0)
+			r.rtm_scope = filter->scope;
+		if (filter->proto >= 0)
+			r.rtm_protocol = filter->proto;
+		if (filter->oif >= 0)
+			p = add_rta(p, RTA_OIF, sizeof(int), &filter->oif);
+		if (filter->gw != INADDR_NONE)
+			p = add_rta(p, RTA_GATEWAY, 4, &filter->gw);
+		if (filter->dest != INADDR_NONE) {
+			p = add_rta(p, RTA_DST, 4, &filter->dest);
+			r.rtm_dst_len = filter->dest_plen;
+		}
+		*/
+	}
+
+	if (nl_send_msg(&nlsock, buf, p - buf))
+		return NULL;
+
+	priv.route = priv.end = NULL;
+	priv.err = 0;
+
+	if (nl_recv_msg(&nlsock, RTM_NEWROUTE, route_cb, &priv))
+		return NULL;
+
+	if (priv.err) {
+		nlr_free_routes(priv.route);
+		priv.route = NULL;
+		return NULL;
+	}
+
+	if (err)
+		*err = 0;
+
+	if (filter) {
+		for (prev = NULL, q = priv.route; q; ) {
+			if (filter->table >= 0 && q->table != filter->table
+			  || filter->type >= 0 && q->type != filter->type
+			  || filter->scope >= 0 && q->scope != filter->scope
+			  || filter->proto >= 0 && q->proto != filter->proto
+			  || filter->gw != INADDR_NONE && q->gw != filter->gw
+			  || filter->dest != INADDR_NONE && (q->dest !=
+			  filter->dest || q->dest_plen != filter->dest_plen)) {
+				/* Delete route from the result list */
+				if (prev) {
+					prev->pnext = q->pnext;
+					free(q);
+					q = prev->pnext;
+				} else {
+					priv.route = q->pnext;
+					free(q);
+					q = priv.route->pnext;
+				}
+			} else {
+				prev = q;
+				q = q->pnext;
+			}
+		}
+	}
+
+	return priv.route;
+}
+
+int route_do(int msg_type, in_addr_t dest, int dest_plen, in_addr_t gw)
+{
+	char buf[128], *p;
+	struct rtmsg r;
+
+	memset(buf, 0, sizeof(buf));
+
+	p = nlmsg_put_hdr(buf, msg_type,
+		msg_type == RTM_NEWROUTE ? NLM_F_CREATE | NLM_F_EXCL | NLM_F_ACK
+		: NLM_F_ACK);
+
+	memset(&r, 0, sizeof(r));
+
+	r.rtm_family = AF_INET;
+	r.rtm_table = RT_TABLE_MAIN;
+	r.rtm_type = RTN_UNICAST;
+	r.rtm_scope = RT_SCOPE_UNIVERSE;
+	r.rtm_protocol = RTPROT_STATIC;
+	r.rtm_dst_len = dest_plen;
+
+	p = add_hdr(p, &r, sizeof(r));
+
+	p = add_rta(p, RTA_DST, 4, &dest);
+	p = add_rta(p, RTA_GATEWAY, 4, &gw);
+
+	if (nl_send_msg(&nlsock, buf, p - buf))
+		return -1;
+	return nl_wait_ack(&nlsock);
+}
+
+int nlr_add_route(in_addr_t dest, int dest_plen, in_addr_t gw)
+{
+	return route_do(RTM_NEWROUTE, dest, dest_plen, gw);
+}
+
+int nlr_del_route(in_addr_t dest, int dest_plen, in_addr_t gw)
+{
+	return route_do(RTM_DELROUTE, dest, dest_plen, gw);
 }

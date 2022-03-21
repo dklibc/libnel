@@ -180,6 +180,335 @@ static int get_iface_info(const char *iface_name)
 	return err;
 }
 
+static const char *route_type_str[] = {
+	[RTN_UNICAST] = "unicast",
+	[RTN_BROADCAST] = "broadcast",
+	[RTN_LOCAL] = "local",
+	[RTN_UNREACHABLE] = "unreachable",
+	[RTN_BLACKHOLE] = "blackhole",
+	[RTN_PROHIBIT] = "prohibit",
+};
+
+static const char *route_scope_str[] = {
+	[RT_SCOPE_HOST] = "host",
+	[RT_SCOPE_LINK] = "link",
+	[RT_SCOPE_UNIVERSE] = "universe",
+	[RT_SCOPE_NOWHERE] = "nowhere",
+};
+
+static const char *route_proto_str[] = {
+	[RTPROT_KERNEL] = "kernel", /* Route installed by kernel */
+	[RTPROT_STATIC] = "static", /* Route installed by admin */
+	[RTPROT_BOOT] = "boot", /* Route installed during boot */
+	[RTPROT_DHCP] = "dhcp", /* Route installed by DHCP client */
+	[RTPROT_BGP] = "bgp", /* BGP routes */
+	[RTPROT_ISIS] = "isis", /* ISIS routes */
+	[RTPROT_OSPF] = "ospf", /* OSPF routes*/
+};
+
+static const char *route_table_str[] = {
+	[RT_TABLE_MAIN] = "main",
+	[RT_TABLE_LOCAL] = "local",
+};
+
+static const char *code2str(int code, const char *str[], int nstrs)
+{
+	static char buf[4];
+
+	if (code < 0 || code >= nstrs || !str[code])
+		snprintf(buf, sizeof(buf), "%d", code);
+	return str[code];
+}
+
+static int str2code(const char *s, const char *str[], int n)
+{
+	int i;
+	char c;
+
+	for (i = 0; i < n && (!str[i] || strcmp(str[i], s)); i++);
+	if (i < n)
+		return i;
+	return i < n || sscanf(s, "%u%c", &i, &c) == 1 ? i : -1;
+}
+
+static int str_cmp(const void *e1, const void *e2)
+{
+	const char *s1 = *(const char **)e1, *s2 = *(const char **)e2;
+	if (!s2)
+		return -1;
+	if (!s1)
+		return 1;
+	return strcmp(s1, s2);
+}
+
+static void print_code_strs(const char *str[], int nstrs)
+{
+	const char **ord;
+	int i;
+
+	ord = malloc(nstrs * sizeof(str[0]));
+	if (!ord)
+		return;
+	memcpy(ord, str, nstrs * sizeof(str[0]));
+	qsort(ord, nstrs, sizeof(ord[0]), str_cmp);
+	for (i = 0; i < nstrs && ord[i]; i++)
+		printf(" * %s\n", ord[i]);
+	printf("\n");
+	free(ord);
+}
+
+/* Return number of elements in static array */
+#define COUNT_OF(a) (sizeof(a)/sizeof((a)[0]))
+
+#define CODE2STR(code, str) (code2str(code, str, COUNT_OF(str)))
+
+static void print_route(struct nlr_route *r)
+{
+	struct in_addr in;
+	const char *oif;
+
+	/* Mimic "ip route" output */
+
+	if (r->dest) {
+		in.s_addr = r->dest;
+		if (r->dest_plen == 32)
+			printf("%s", inet_ntoa(in));
+		else
+			printf("%s/%d", inet_ntoa(in), r->dest_plen);
+		if (r->gw) {
+			in.s_addr = r->gw;
+			printf(" via %s", inet_ntoa(in));
+		}
+	} else {
+		in.s_addr = r->gw;
+		printf("default via %s", inet_ntoa(in));
+	}
+
+	/*
+	if (r->table != RT_TABLE_MAIN && r->table != RT_TABLE_LOCAL) {
+		printf(" table %s", CODE2STR(r->table, route_table_str));
+	}
+	*/
+
+	/*
+	if (r->type != RTN_UNICAST) {
+		printf(" type %s", CODE2STR(r->type, route_type_str));
+	}
+	*/
+
+	oif = nlr_iface_name(r->oif);
+	printf(" dev %s", oif);
+	free((void *)oif);
+
+	printf(" proto %s", CODE2STR(r->proto, route_proto_str));
+
+	if (r->scope != RT_SCOPE_UNIVERSE)
+		printf(" scope %s", CODE2STR(r->scope, route_scope_str));
+
+	if (r->prefsrc) {
+		in.s_addr = r->prefsrc;
+		printf(" src %s", inet_ntoa(in));
+	}
+
+	if (r->flags & RTNH_F_LINKDOWN)
+		printf(" linkdown");
+	printf("\n");
+}
+
+/* 24 --> 255.255.255.0 */
+static unsigned netmask(int plen)
+{
+	return htonl(~0 << (32 - plen));
+}
+
+static void init_route_filter(struct nlr_route *filter)
+{
+	filter->dest = INADDR_NONE;
+	filter->dest_plen = -1;
+	filter->gw = INADDR_NONE;
+	filter->table = -1;
+	filter->type = -1;
+	filter->scope = -1;
+	filter->proto = -1;
+}
+
+static int get_route(const char *s_addr)
+{
+	struct nlr_route *r, *p, *q, filter;
+	int err;
+	in_addr_t addr;
+
+	addr = inet_addr(s_addr);
+	if (addr == INADDR_ANY) {
+		printf("Invalid address format\n");
+		return -1;
+	}
+	init_route_filter(&filter);
+	//filter.table = RT_TABLE_MAIN;
+	r = nlr_get_routes(&filter, &err);
+	if (err) {
+		nlr_free_routes(r);
+		return -1;
+	}
+	if (!r)
+		return 0;
+	for (p = r, q = NULL; p; p = p->pnext) {
+		if ((addr & netmask(p->dest_plen)) == p->dest) {
+			if (!q || p->dest_plen > q->dest_plen)
+				q = p;
+		}
+	}
+	if (q)
+		print_route(q);
+	nlr_free_routes(r);
+	return 0;
+}
+
+
+#define STR2CODE(s, str) str2code(s, str, COUNT_OF(str))
+#define PRINT_CODE_STRS(str) print_code_strs(str, COUNT_OF(str))
+
+static int show_routes(char *w[])
+{
+	int err;
+	struct nlr_route *h, *r, filter;
+	int i, mimic_iproute = 1;
+
+	init_route_filter(&filter);
+
+	if (!w || !w[0])
+		goto w_processing_done;
+
+	if (!strcmp(w[0], "all")) {
+		if (w[1]) {
+			printf("Expecting nothing after \"all\"\n");
+			return -1;
+		}
+		mimic_iproute = 0;
+		goto w_processing_done;
+	}
+
+	for (i = 0; w[i]; i += 2) {
+		if (!w[i + 1]) {
+			printf("Option \"%s\" expected value!\n", w[i]);
+			return -1;
+		}
+		if (!strcmp(w[i], "dest")) {
+			if (filter.dest != INADDR_NONE) {
+			}
+			if (parse_addr(w[i + 1], &filter.dest,
+				&filter.dest_plen)) {
+				printf("Invalid format of destination address\n");
+				return -1;
+			}
+		} else if (!strcmp(w[i], "gw")) {
+			if (filter.gw != INADDR_NONE) {
+			}
+			filter.gw = inet_addr(w[i + 1]);
+			if (filter.gw == INADDR_NONE) {
+				printf("Invalid format of gateway address\n");
+				return -1;
+			}
+		} else if (!strcmp(w[i], "type")) {
+			if (filter.type >= 0) {
+			}
+			filter.type = STR2CODE(w[i + 1], route_type_str);
+			if (filter.type < 0) {
+				printf("Unknown route type. Use numeric value or one of:\n");
+				PRINT_CODE_STRS(route_type_str);
+				return -1;
+			}
+		} else if (!strcmp(w[i], "scope")) {
+			if (filter.scope >= 0) {
+			}
+			filter.scope = STR2CODE(w[i + 1], route_scope_str);
+			if (filter.scope < 0) {
+				printf("Unknown route scope. Use numeric value or one of:\n");
+				PRINT_CODE_STRS(route_scope_str);
+				return -1;
+			}
+		} else if (!strcmp(w[i], "proto")) {
+			if (filter.proto >= 0) {
+			}
+			filter.proto = STR2CODE(w[i + 1], route_proto_str);
+			if (filter.proto < 0) {
+				printf("Unknown route protocol. Use numeric value or one of:\n");
+				PRINT_CODE_STRS(route_proto_str);
+				return -1;
+			}
+		} else if (!strcmp(w[i], "table")) {
+			if (filter.table >= 0) {
+			}
+			filter.table = STR2CODE(w[i + 1], route_table_str);
+			if (filter.table < 0) {
+				printf("Unknown route table. Use numeric value or one of:\n");
+				PRINT_CODE_STRS(route_table_str);
+				return -1;
+			}
+		} else {
+			printf("Unknown option: \"%s\"\n", w[i]);
+			return -1;
+		}
+	}
+w_processing_done:
+
+	h = nlr_get_routes(&filter, &err);
+	if (err)
+		return -1;
+
+	if (mimic_iproute) {
+		/*
+		 * If user doesn't specify a filter, then mimic "ip route
+		 * output".
+		 */
+		for (r = h; r; r = r->pnext) {
+			if (r->table != RT_TABLE_MAIN
+				&& r->table != RT_TABLE_LOCAL)
+				continue;
+			if (r->type != RTN_UNICAST && r->type != RTN_LOCAL)
+				continue;
+			if (r->scope != RT_SCOPE_UNIVERSE
+				&& r->scope != RT_SCOPE_LINK)
+				continue;
+			print_route(r);
+		}
+	} else {
+		for (r = h; r; r = r->pnext)
+			print_route(r);
+	}
+
+	nlr_free_routes(h);
+	return err;
+}
+
+static int manage_route(const char *dest, const char *gw,
+		       int (*f)(in_addr_t, int, in_addr_t))
+{
+	in_addr_t dest_addr, gw_addr;
+	int dest_plen;
+
+	if (parse_addr(dest, &dest_addr, &dest_plen)) {
+		printf("Invalid format of dest addr\n");
+		return -1;
+	}
+	gw_addr = inet_addr(gw);
+	if (gw_addr == INADDR_NONE) {
+		printf("Invalid gw addr\n");
+		return -1;
+	}
+	return f(dest_addr, dest_plen, gw_addr);
+}
+
+static int add_route(const char *dest, const char *gw)
+{
+	return manage_route(dest, gw, nlr_add_route);
+}
+
+static int del_route(const char *dest, const char *gw)
+{
+	return manage_route(dest, gw, nlr_del_route);
+}
+
 static void help(void)
 {
 	printf("\nUsage: [OPTIONS] OBJECT CMD [CMD_OPTIONS]" \
@@ -189,6 +518,10 @@ static void help(void)
 	       "\n$ ip link set IFACE addr hh:hh:hh:hh:hh:hh" \
 	       "\n$ ip addr [show [IFACE]]" \
 	       "\n$ ip addr add|del IFACE ADDR/BITS" \
+	       "\n$ ip route [show [dest ADDR/BITS] [proto PROTO] [type TYPE] [scope SCOPE] [table TABLE] [gw ADDR]]" \
+	       "\n$ ip route show all" \
+	       "\n$ ip route get ADDR" \
+	       "\n$ ip route add|del DEST/BITS via GW" \
 	       "\n"
 	);
 }
@@ -263,6 +596,26 @@ int main(int argc, char *argv[])
 		} else if (!strcmp(cmd, "del")) {
 			if (argv[0] && argv[1]) {
 				r = del_addr(argv[0], argv[1]);
+			}
+		}
+	} else if (!strcmp(obj, "route")) {
+		if (!cmd) {
+			r = show_routes(NULL);
+		} else if (!strcmp(cmd, "show")) {
+			r = show_routes(argv);
+		} else if (!strcmp(cmd, "get")) {
+			if (!argv[1]) {
+				r = get_route(argv[0]);
+			}
+		} else if (!strcmp(cmd, "add")) {
+			if (argv[0] && !strcmp(argv[1], "via")
+				&& argv[2]) {
+				r = add_route(argv[0], argv[2]);
+			}
+		} else if (!strcmp(cmd, "del")) {
+			if (argv[0] && !strcmp(argv[2], "via")
+				&& argv[2]) {
+				r = del_route(argv[0], argv[2]);
 			}
 		}
 	}

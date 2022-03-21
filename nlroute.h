@@ -3,6 +3,7 @@
 
 #include <net/if.h>
 #include <arpa/inet.h>
+#include <linux/rtnetlink.h>
 
 int nlr_init(void);
 void nlr_fin(void);
@@ -59,5 +60,34 @@ int nlr_set_iface(int iface_idx, int up);
 #define NLR_IFACE_DOWN(idx) nlr_set_iface(idx, 0)
 
 int nlr_set_mac_addr(int iface_idx, char addr[6]);
+
+struct nlr_route {
+	int table;
+	int type;
+	int scope;
+	int proto;
+	int metrics;
+	unsigned flags;
+
+	in_addr_t dest;
+	int dest_plen;
+	in_addr_t gw;
+	int oif; /* Output interface index */
+	in_addr_t prefsrc; /* Preffered source address */
+
+	struct nlr_route *pnext;
+};
+
+int nlr_add_route(in_addr_t dest, int dest_plen, in_addr_t gw);
+int nlr_del_route(in_addr_t dest, int dest_plen, in_addr_t gw);
+/*
+ * You can filter what routes you want to get by setting this
+ * fields of @filter: @table, @type, @scope, @proto, @dest,
+ * @dest_plen, @gw, @oif, @prefsrc. If int field has negative value,
+ * it will be treated as unset ("any"). If addr field has INADDR_NONE(-1)
+ * value, it will be treated as unset ("any"). @filter can be NULL.
+ */
+struct nlr_route *nlr_get_routes(struct nlr_route *filter, int *err);
+void nlr_free_routes(struct nlr_route *r);
 
 #endif
