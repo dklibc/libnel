@@ -3,4 +3,5 @@
 *.so
 *.a
 ip
+iw
 install_manifest.txt
