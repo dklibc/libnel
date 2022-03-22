@@ -180,7 +180,80 @@ static int get_iface_info(const char *iface_name)
 	return err;
 }
 
-static const char *route_type_str[] = {
+/*
+ * For known code (>=0) return its name, for unknown code return
+ * its numeric value. @t[] -- possible names, sparse array
+ * (indexed by code, some elements are NULL). @n -- number of
+ * elements in @t[].
+ */
+static const char *code2name(int code, const char *t[], int n)
+{
+	static char buf[4];
+
+	if (code < 0 || code >= n || !t[code]) {
+		snprintf(buf, sizeof(buf), "%d", code);
+		return buf;
+	}
+	return t[code];
+}
+
+/*
+ * Return code by its name. If name is unknown, return <0.
+ * Support code numeric value in place of name, in this case
+ * return a value.
+ */
+static int name2code(const char *name, const char *t[], int n)
+{
+	int i;
+	char c;
+
+	for (i = 0; i < n && (!t[i] || strcmp(t[i], name)); i++);
+	if (i < n)
+		return i;
+	return i < n || sscanf(name, "%u%c", &i, &c) == 1 ? i : -1;
+}
+
+/*
+ * Helper function used by code_names() only. Support NULL in place
+ * of @e1 and @e2. While sorting NULLs will be placed ath the end of
+ * an array.
+ */
+static int code_names_qsort_cmp(const void *p1, const void *p2)
+{
+	const char *s1 = *(const char **)p1, *s2 = *(const char **)p2;
+	if (!s2)
+		return -1;
+	if (!s1)
+		return 1;
+	return strcmp(s1, s2);
+}
+
+/*
+ * Return alphabetically sorted dynamically allocated array
+ * of code names (terminated with NULL). Used by help functions.
+ */
+static char **code_names(const char *t[], int n)
+{
+	char **r;
+	int i;
+
+	r = malloc((n + 1) * sizeof(t[0]));
+	if (!r)
+		return NULL;
+	memcpy(r, t, n * sizeof(t[0]));
+	qsort(r, n, sizeof(t[0]), code_names_qsort_cmp);
+	r[n] = NULL;
+	return r;
+}
+
+/* Wrappers on code-name functions */
+/* Return number of elements in static array */
+#define COUNT_OF(a) (sizeof(a)/sizeof((a)[0]))
+#define CODE2NAME(code, t) (code2name(code, t, COUNT_OF(t)))
+#define NAME2CODE(name, t) name2code(name, t, COUNT_OF(t))
+#define CODE_NAMES(t) code_names(t, COUNT_OF(t))
+
+static const char *route_type_name[] = {
 	[RTN_UNICAST] = "unicast",
 	[RTN_BROADCAST] = "broadcast",
 	[RTN_LOCAL] = "local",
@@ -189,14 +262,14 @@ static const char *route_type_str[] = {
 	[RTN_PROHIBIT] = "prohibit",
 };
 
-static const char *route_scope_str[] = {
+static const char *route_scope_name[] = {
 	[RT_SCOPE_HOST] = "host",
 	[RT_SCOPE_LINK] = "link",
 	[RT_SCOPE_UNIVERSE] = "universe",
 	[RT_SCOPE_NOWHERE] = "nowhere",
 };
 
-static const char *route_proto_str[] = {
+static const char *route_proto_name[] = {
 	[RTPROT_KERNEL] = "kernel", /* Route installed by kernel */
 	[RTPROT_STATIC] = "static", /* Route installed by admin */
 	[RTPROT_BOOT] = "boot", /* Route installed during boot */
@@ -206,61 +279,11 @@ static const char *route_proto_str[] = {
 	[RTPROT_OSPF] = "ospf", /* OSPF routes*/
 };
 
-static const char *route_table_str[] = {
+static const char *route_table_name[] = {
 	[RT_TABLE_MAIN] = "main",
 	[RT_TABLE_LOCAL] = "local",
 };
 
-static const char *code2str(int code, const char *str[], int nstrs)
-{
-	static char buf[4];
-
-	if (code < 0 || code >= nstrs || !str[code])
-		snprintf(buf, sizeof(buf), "%d", code);
-	return str[code];
-}
-
-static int str2code(const char *s, const char *str[], int n)
-{
-	int i;
-	char c;
-
-	for (i = 0; i < n && (!str[i] || strcmp(str[i], s)); i++);
-	if (i < n)
-		return i;
-	return i < n || sscanf(s, "%u%c", &i, &c) == 1 ? i : -1;
-}
-
-static int str_cmp(const void *e1, const void *e2)
-{
-	const char *s1 = *(const char **)e1, *s2 = *(const char **)e2;
-	if (!s2)
-		return -1;
-	if (!s1)
-		return 1;
-	return strcmp(s1, s2);
-}
-
-static void print_code_strs(const char *str[], int nstrs)
-{
-	const char **ord;
-	int i;
-
-	ord = malloc(nstrs * sizeof(str[0]));
-	if (!ord)
-		return;
-	memcpy(ord, str, nstrs * sizeof(str[0]));
-	qsort(ord, nstrs, sizeof(ord[0]), str_cmp);
-	for (i = 0; i < nstrs && ord[i]; i++)
-		printf(" * %s\n", ord[i]);
-	printf("\n");
-	free(ord);
-}
-
-/* Return number of elements in static array */
-#define COUNT_OF(a) (sizeof(a)/sizeof((a)[0]))
-
-#define CODE2STR(code, str) (code2str(code, str, COUNT_OF(str)))
 
 static void print_route(struct nlr_route *r)
 {
@@ -286,13 +309,13 @@ static void print_route(struct nlr_route *r)
 
 	/*
 	if (r->table != RT_TABLE_MAIN && r->table != RT_TABLE_LOCAL) {
-		printf(" table %s", CODE2STR(r->table, route_table_str));
+		printf(" table %s", CODE2NAME(r->table, route_table_name));
 	}
 	*/
 
 	/*
 	if (r->type != RTN_UNICAST) {
-		printf(" type %s", CODE2STR(r->type, route_type_str));
+		printf(" type %s", CODE2NAME(r->type, route_type_name));
 	}
 	*/
 
@@ -300,10 +323,10 @@ static void print_route(struct nlr_route *r)
 	printf(" dev %s", oif);
 	free((void *)oif);
 
-	printf(" proto %s", CODE2STR(r->proto, route_proto_str));
+	printf(" proto %s", CODE2NAME(r->proto, route_proto_name));
 
 	if (r->scope != RT_SCOPE_UNIVERSE)
-		printf(" scope %s", CODE2STR(r->scope, route_scope_str));
+		printf(" scope %s", CODE2NAME(r->scope, route_scope_name));
 
 	if (r->prefsrc) {
 		in.s_addr = r->prefsrc;
@@ -364,15 +387,12 @@ static int get_route(const char *s_addr)
 	return 0;
 }
 
-
-#define STR2CODE(s, str) str2code(s, str, COUNT_OF(str))
-#define PRINT_CODE_STRS(str) print_code_strs(str, COUNT_OF(str))
-
 static int show_routes(char *w[])
 {
 	int err;
 	struct nlr_route *h, *r, filter;
 	int i, mimic_iproute = 1;
+	char **t;
 
 	init_route_filter(&filter);
 
@@ -412,37 +432,57 @@ static int show_routes(char *w[])
 		} else if (!strcmp(w[i], "type")) {
 			if (filter.type >= 0) {
 			}
-			filter.type = STR2CODE(w[i + 1], route_type_str);
+			filter.type = NAME2CODE(w[i + 1], route_type_name);
 			if (filter.type < 0) {
 				printf("Unknown route type. Use numeric value or one of:\n");
-				PRINT_CODE_STRS(route_type_str);
+				t = CODE_NAMES(route_type_name);
+				if (t) {
+					for (i = 0; t[i]; i++)
+						printf("* %s\n", t[i]);
+					free(t);
+				}
 				return -1;
 			}
 		} else if (!strcmp(w[i], "scope")) {
 			if (filter.scope >= 0) {
 			}
-			filter.scope = STR2CODE(w[i + 1], route_scope_str);
+			filter.scope = NAME2CODE(w[i + 1], route_scope_name);
 			if (filter.scope < 0) {
 				printf("Unknown route scope. Use numeric value or one of:\n");
-				PRINT_CODE_STRS(route_scope_str);
+				t = CODE_NAMES(route_scope_name);
+				if (t) {
+					for (i = 0; t[i]; i++)
+						printf("* %s\n", t[i]);
+					free(t);
+				}
 				return -1;
 			}
 		} else if (!strcmp(w[i], "proto")) {
 			if (filter.proto >= 0) {
 			}
-			filter.proto = STR2CODE(w[i + 1], route_proto_str);
+			filter.proto = NAME2CODE(w[i + 1], route_proto_name);
 			if (filter.proto < 0) {
 				printf("Unknown route protocol. Use numeric value or one of:\n");
-				PRINT_CODE_STRS(route_proto_str);
+				t = CODE_NAMES(route_proto_name);
+				if (t) {
+					for (i = 0; t[i]; i++)
+						printf("* %s\n", t[i]);
+					free(t);
+				}
 				return -1;
 			}
 		} else if (!strcmp(w[i], "table")) {
 			if (filter.table >= 0) {
 			}
-			filter.table = STR2CODE(w[i + 1], route_table_str);
+			filter.table = NAME2CODE(w[i + 1], route_table_name);
 			if (filter.table < 0) {
 				printf("Unknown route table. Use numeric value or one of:\n");
-				PRINT_CODE_STRS(route_table_str);
+				t = CODE_NAMES(route_table_name);
+				if (t) {
+					for (i = 0; t[i]; i++)
+						printf("* %s\n", t[i]);
+					free(t);
+				}
 				return -1;
 			}
 		} else {
