@@ -341,6 +341,8 @@ static void print_route(struct nlr_route *r)
 /* 24 --> 255.255.255.0 */
 static unsigned netmask(int plen)
 {
+	if (!plen)
+		return 0;
 	return htonl(~0 << (32 - plen));
 }
 
