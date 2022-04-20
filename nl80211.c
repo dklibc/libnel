@@ -15,35 +15,34 @@ static int nl80211_initialized;
 
 int nl80211_init(void)
 {
-	if (nl80211_initialized)
-		return 0;
+	if (!nl80211_initialized) {
+		nlog_init();
 
-	nlog_init();
+		if (genl_open(&nlsock))
+			return -1;
 
-	if (genl_open(&nlsock))
-		return -1;
+		nl80211_id = genl_service_id(&nlsock, "nl80211");
+		if (nl80211_id < 0) {
+			nl_close(&nlsock);
+			return -1;
+		}
 
-	nl80211_id = genl_service_id(&nlsock, "nl80211");
-	if (nl80211_id < 0) {
-		nl_close(&nlsock);
-		return -1;
+		DEBUG("nl80211 has id=%d", nl80211_id);
 	}
 
-	DEBUG("nl80211 has id=%d", nl80211_id);
-
-	nl80211_initialized = 1;
+	nl80211_initialized++;
 
 	return 0;
 }
 
 void nl80211_fin(void)
 {
-	if (!nl80211_initialized)
-		return;
+	if (nl80211_initialized == 1) {
+		nl_close(&nlsock);
+	}
 
-	nl_close(&nlsock);
-
-	nl80211_initialized = 0;
+	if (nl80211_initialized)
+		--nl80211_initialized;
 }
 
 void nl80211_iface_free(struct nl80211_iface *iface)

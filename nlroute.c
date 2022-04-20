@@ -28,27 +28,23 @@ static int nlr_initialized;
 
 int nlr_init(void)
 {
-	if (nlr_initialized)
-		return 0;
-
-	nlog_init();
-
-	if (nl_open(&nlsock, NETLINK_ROUTE))
-		return -1;
-
-	nlr_initialized = 1;
-
+	if (!nlr_initialized) {
+		/* Only the first call actually inits. */
+		nlog_init();
+		if (nl_open(&nlsock, NETLINK_ROUTE))
+			return -1;
+	}
+	nlr_initialized++;
 	return 0;
 }
 
 void nlr_fin(void)
 {
-	if (!nlr_initialized)
-		return;
-
-	nl_close(&nlsock);
-
-	nlr_initialized = 0;
+	if (nlr_initialized == 1) {
+		nl_close(&nlsock);
+	}
+	if (nlr_initialized)
+		--nlr_initialized;
 }
 
 static char *add_hdr(char *p, void *hdr, int len)
