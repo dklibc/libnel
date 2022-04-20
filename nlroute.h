@@ -11,9 +11,11 @@ void nlr_fin(void);
 int nlr_iface_idx(const char *name);
 char *nlr_iface_name(int idx);
 
+/* See "/usr/include/linux/if_arp.h" */
 enum nlr_iface_type {
 	NLR_IFACE_ETHER = 1,
 	NLR_IFACE_LOOPBACK = 772,
+	NLR_IFACE_WIRELESS = 801,
 };
 
 struct nlr_iface {
