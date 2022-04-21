@@ -587,7 +587,7 @@ int main(int argc, char *argv[])
 	} else if (!strcmp(argv[i], "-d2")) {
 		logmask |= LOG_MASK(LOG_INFO) | LOG_MASK(LOG_DEBUG);
 		/* Enable debugging in the libnel */
-		setenv("NLOG_DEBUG", "1", 0);
+		setenv("LIBNEL_DEBUG", "1", 0);
 		i++;
 	}
 

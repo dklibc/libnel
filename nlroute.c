@@ -21,7 +21,6 @@
 
 #include "nlcore.h"
 #include "nlroute.h"
-#include "nlog.h"
 
 static struct nl_sock nlsock;
 static int nlr_initialized;
@@ -30,7 +29,6 @@ int nlr_init(void)
 {
 	if (!nlr_initialized) {
 		/* Only the first call actually inits. */
-		nlog_init();
 		if (nl_open(&nlsock, NETLINK_ROUTE))
 			return -1;
 	}

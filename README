@@ -19,7 +19,7 @@ Implements API to generic netlink.
 * libnel-80211 -- based libnel-genl. Implemets API
 for management Wi-Fi/802.11.
 
-To debug define environment variable NLOG_DEBUG.
+To debug define environment variable LIBNEL_DEBUG.
 
 For testing libnel-route we've created a simple cmdline util 'ip':
 Usage: [OPTIONS] OBJECT CMD [CMD_OPTIONS].

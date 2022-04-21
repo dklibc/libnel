@@ -6,9 +6,7 @@
 #include <stdio.h>
 #include <linux/genetlink.h>
 
-#include "nlcore.h"
 #include "genlcore.h"
-#include "nlog.h"
 
 int genl_open(struct nl_sock *nlsock)
 {

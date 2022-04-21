@@ -4,17 +4,38 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include <stdarg.h>
+#include <stdlib.h>
+#include <syslog.h>
 #include <sys/socket.h>
 #include <net/if.h>
 #include <linux/netlink.h>
 
 #include "nlcore.h"
-#include "nlog.h"
+
+static int nlog_dbg;
+
+void nlog(int priority, const char *frmt, ...)
+{
+	va_list args;
+
+	if (priority == LOG_DEBUG && !nlog_dbg)
+		return;
+
+	va_start(args, frmt);
+
+	vsyslog(priority, frmt, args);
+
+	va_end(args);
+}
 
 int nl_open(struct nl_sock *nlsock, int service)
 {
 	struct sockaddr_nl sa;
 	int n;
+
+	if (getenv("LIBNEL_DEBUG"))
+		nlog_dbg = 1;
 
 	if (nlsock->pid > 0)
 		nl_close(nlsock);

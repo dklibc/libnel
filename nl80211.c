@@ -7,7 +7,6 @@
 
 #include "genlcore.h"
 #include "nl80211.h"
-#include "nlog.h"
 
 static struct nl_sock nlsock;
 static int nl80211_id;
@@ -16,13 +15,12 @@ static int nl80211_initialized;
 int nl80211_init(void)
 {
 	if (!nl80211_initialized) {
-		nlog_init();
-
 		if (genl_open(&nlsock))
 			return -1;
 
 		nl80211_id = genl_service_id(&nlsock, "nl80211");
 		if (nl80211_id < 0) {
+			ERROR("Failed to get generic netlink service id of \"nl80211\".");
 			nl_close(&nlsock);
 			return -1;
 		}
