@@ -11,7 +11,10 @@ void nlr_fin(void);
 int nlr_iface_idx(const char *name);
 char *nlr_iface_name(int idx);
 
-/* See "/usr/include/linux/if_arp.h" */
+/*
+ * See "/usr/include/linux/if_arp.h".
+ * NOTE: bridge iface and vlan iface has type "ethernet".
+ */
 enum nlr_iface_type {
 	NLR_IFACE_ETHER = 1,
 	NLR_IFACE_LOOPBACK = 772,
@@ -26,6 +29,17 @@ struct nlr_iface {
 	enum nlr_iface_type type;
 	int is_up;
 	int carrier_on;
+	int master_idx; /* Master iface index -- iface that gets all
+	packets from this iface. E.g. if iface is included in bridge,
+	it has an master iface -- bridge iface, the same with bonding.
+	A kernel says you: "all packets from this iface I will send not
+	to TCP/IP stack, but to this iface/device". */
+	int link_idx; /* VLAN ifaces has no master iface (IFLA_MASTER attr),
+	but has IFLA_LINK attr -- index of the iface from that it gets
+	packets. ip util shows this in this way: "iface@link", e.g. "eth0@100".
+	IMPORTANT: in Cisco VLAN iface is a subinterface, not an independent
+	interface.
+	*/
 	struct {
 		long tx_bytes, tx_packets;
 		long rx_bytes, rx_packets;

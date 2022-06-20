@@ -229,6 +229,8 @@ static int iface_cb(struct nlmsghdr *nlhdr, void *_priv)
 	iface->is_up = ifi->ifi_flags & IFF_UP;
 	iface->carrier_on = ifi->ifi_flags & IFF_LOWER_UP;
 	iface->mtu = -1;
+	iface->master_idx = -1;
+	iface->link_idx = -1;
 
 	for (rta = IFLA_RTA(ifi), n = RTM_PAYLOAD(nlhdr);
 	     RTA_OK(rta, n); rta = RTA_NEXT(rta, n)) {
@@ -244,6 +246,10 @@ static int iface_cb(struct nlmsghdr *nlhdr, void *_priv)
 			iface->stats.tx_packets = stats->tx_packets;
 			iface->stats.rx_bytes = stats->rx_bytes;
 			iface->stats.rx_packets = stats->rx_packets;
+		} else if (rta->rta_type == IFLA_MASTER) {
+			iface->master_idx = *(int *)RTA_DATA(rta);
+		} else if (rta->rta_type == IFLA_LINK) {
+			iface->link_idx = *(int *)RTA_DATA(rta);
 		}
 	}
 
@@ -704,6 +710,9 @@ int nlr_del_route(in_addr_t dest, int dest_plen, in_addr_t gw)
  * ip link set dev eth0 nomaster
  *
  * To delete master, set @master_idx<0.
+ *
+ * To add iface to bridge set it a bridge as master.
+ * But! VLAN iface has no master iface!
  */
 int nlr_set_master(int iface_idx, int master_idx)
 {
