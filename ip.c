@@ -3,8 +3,11 @@
 #include <stdlib.h>
 #include <syslog.h>
 #include <arpa/inet.h>
+#include <unistd.h>
 
 #include "nlroute.h"
+
+static int stats;
 
 static int set_iface(const char *name, int up)
 {
@@ -190,18 +193,23 @@ static int get_addr(const char *iface)
 const char *nlr_iface_type2str(enum nlr_iface_type type)
 {
 	static const char *t[] = {
-		[NLR_IFACE_LOOPBACK] = "Loopback",
-		[NLR_IFACE_ETHER] = "Ethernet",
+		[NLR_IFACE_LOOPBACK] = "loopback",
+		[NLR_IFACE_ETHER] = "ethernet",
 	};
+	static char buf[32];
 
-	return type >= 0 && type < sizeof(t)/sizeof(t[0]) && t[type] ?
-		t[type] : "Unknown";
+	if (type >= 0 && type < sizeof(t)/sizeof(t[0]) && t[type])
+		return t[type];
+
+	snprintf(buf, sizeof(buf), "(%d)", type);
+	return buf;
 }
 
 static int get_iface_info(const char *iface_name)
 {
 	struct nlr_iface *iface, *p;
-	int iface_idx = -1, err;
+	int iface_idx = -1, err, n;
+	char *master, *link;
 
 	if (iface_name) {
 		iface_idx = nlr_iface_idx(iface_name);
@@ -213,26 +221,57 @@ static int get_iface_info(const char *iface_name)
 
 	iface = nlr_iface(iface_idx, &err);
 
-	for (p = iface; p; p = p->pnext) {
-		printf("\niface %s\n"
-		       "         idx: %d\n"
-		       "        type: %s\n"
-		       "         mtu: %d\n"
-		       "       state: %s\n"
-		       "     carrier: %s\n"
-		       "        addr: %02x:%02x:%02x:%02x:%02x:%02x\n"
-		       "    tx_bytes: %ld\n"
-		       "  tx_packets: %ld\n"
-		       "    rx_bytes: %ld\n"
-		       "  rx_packets: %ld\n",
-		       p->name, p->idx, nlr_iface_type2str(p->type),
-		       p->mtu, p->is_up ? "Up" : "Down",
-		       p->carrier_on ? "Yes" : "No",
-		       p->addr[0], p->addr[1], p->addr[2],
-		       p->addr[3], p->addr[4], p->addr[5],
-		       p->stats.tx_bytes, p->stats.tx_packets,
-		       p->stats.rx_bytes, p->stats.rx_packets
-		);
+	for (p = iface, n = 12; p; p = p->pnext) {
+		printf("\niface ");
+		if (p->link_idx >= 0) {
+			/* Mimic ip link show format */
+			link = nlr_iface_name(p->link_idx);
+			if (link) {
+				printf("%s@%s\n", p->name, link);
+				free(link);
+			} else {
+				printf("%s@%d\n", p->name, p->link_idx);
+			}
+		} else {
+			printf("%s\n", p->name);
+		}
+
+		if (p->master_idx >= 0) {
+			master = nlr_iface_name(p->master_idx);
+			printf("%*s: %s\n", n, "master", master);
+			free(master);
+		}
+
+		printf("%*s: %d\n", n, "idx", p->idx);
+
+		printf("%*s: %s\n", n, "type", nlr_iface_type2str(p->type));
+
+		if (p->mtu > 0)
+			printf("%*s: %d\n", n, "mtu", p->mtu);
+
+		printf("%*s: %s\n", n, "admin-state",
+			p->is_up ? "up" : "down");
+
+		printf("%*s: %s\n", n, "carrier", p->carrier_on ? "yes" : "no");
+
+		if (p->addr[0] && p->addr[1] && p->addr[2] && p->addr[3]
+			&& p->addr[4] && p->addr[5]) {
+			printf("%*s: %02x:%02x:%02x:%02x:%02x:%02x\n", n,
+				"addr", p->addr[0], p->addr[1], p->addr[2],
+				p->addr[3], p->addr[4], p->addr[5]
+			);
+		}
+
+		if (stats) {
+			printf("%*s: %ld\n", n, "tx-bytes", p->stats.tx_bytes);
+			printf("%*s: %ld\n", n, "tx-packets",
+				p->stats.tx_packets
+			);
+			printf("%*s: %ld\n", n, "rx-bytes", p->stats.rx_bytes);
+			printf("%*s: %ld\n", n, "rx-packets",
+				p->stats.rx_packets
+			);
+		}
 	}
 
 	nlr_iface_free(iface);
@@ -614,7 +653,8 @@ static int del_route(const char *dest, const char *gw)
 static void help(void)
 {
 	printf("\nUsage: [OPTIONS] OBJECT CMD [CMD_OPTIONS]" \
-	       "\nOptions: -d -- log level info, -d2 -- debug, -h -- help" \
+	       "\nOptions: -d -- debug, -h -- help" \
+	       " -s -- stats (show more detailed info),"
 	       "\n$ ip link [show [IFACE]]" \
 	       "\n$ ip link add IFACE type bridge" \
 	       "\n$ ip link add IFACE type vlan MASTER_IFACE VLAN_ID" \
@@ -637,6 +677,7 @@ int main(int argc, char *argv[])
 {
 	int r, i, logmask;
 	const char *obj, *cmd, *iface;
+	int c, debug;
 
 	if (!argv[1] || !strcmp(argv[1], "-h")) {
 		help();
@@ -644,23 +685,34 @@ int main(int argc, char *argv[])
 	}
 
 	/* Parse common options */
-	i = 1;
+	debug = 0;
+	while ((c = getopt(argc, (char **)argv, "dsh")) != -1) {
+		switch (c) {
+		case 'd':
+			debug = 1;
+			break;
+		case 'h':
+			help();
+			return 0;
+		case 's':
+			stats = 1;
+			break;
+		case '?':
+		default:
+			fprintf(stderr, "\nInvalid options. Use '-h' to get help.\n");
+			return -1;
+		}
+	}
+
+	i = optind;
+	if (i == argc)
+		return 0;
 	logmask = LOG_MASK(LOG_ERR);
-	if (!strcmp(argv[i], "-d")) {
-		logmask |= LOG_MASK(LOG_INFO);
-		i++;
-	} else if (!strcmp(argv[i], "-d2")) {
+	if (debug) {
 		logmask |= LOG_MASK(LOG_INFO) | LOG_MASK(LOG_DEBUG);
 		/* Enable debugging in the libnel */
 		setenv("LIBNEL_DEBUG", "1", 0);
-		i++;
 	}
-
-	if (!argv[i]) {
-		help();
-		return 0;
-	}
-
 	openlog(NULL, LOG_PERROR, LOG_USER);
 	setlogmask(logmask);
 
