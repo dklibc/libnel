@@ -134,8 +134,8 @@ int nl_wait_ack(struct nl_sock *nlsock)
 	}
 
 	errmsg = NLMSG_DATA(nlhdr);
-	DEBUG("error msg with code (errno)=%d (%s)", errmsg->error,
-		strerror(errmsg->error));
+	DEBUG("error msg with code (errno)=%d (%s)", -errmsg->error,
+		strerror(-errmsg->error));
 	return errmsg->error;
 
 err:
