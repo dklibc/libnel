@@ -40,6 +40,66 @@ static int set_iface_addr(const char *name, const char * s_addr)
 	return nlr_set_mac_addr(idx, addr);
 }
 
+static int set_iface_master(const char*name, const char *master)
+{
+	int iface_idx, master_idx;
+
+	iface_idx = nlr_iface_idx(name);
+	if (iface_idx < 0) {
+		IFACE_IDX_FAILED(name);
+		return -1;
+	}
+
+	if (master) {
+		master_idx = nlr_iface_idx(master);
+		if (master_idx < 0) {
+			IFACE_IDX_FAILED(master);
+			return -1;
+		}
+	} else {
+		master_idx = -1;
+	}
+
+	return nlr_set_master(iface_idx, master_idx);
+}
+
+static int del_iface(const char *name)
+{
+	int iface_idx;
+
+	iface_idx = nlr_iface_idx(name);
+	if (iface_idx < 0) {
+		IFACE_IDX_FAILED(name);
+		return -1;
+	}
+
+	return nlr_del_iface(iface_idx);
+}
+
+static int add_bridge(const char *name)
+{
+	return nlr_add_bridge(name);
+}
+
+static int add_vlan(const char *name, const char *master, const char *s_vlan_id)
+{
+	int master_idx, vlan_id;
+	char c;
+
+	if (sscanf(s_vlan_id, "%d%c", &vlan_id, &c) != 1 || vlan_id < 0) {
+		fprintf(stderr, "Invalid vlan id.\n");
+		return -1;
+	}
+
+	master_idx = nlr_iface_idx(master);
+	if (master_idx < 0) {
+		IFACE_IDX_FAILED(master);
+		return -1;
+	}
+
+	return nlr_add_vlan(name, master_idx, vlan_id);
+}
+
 /* "x.x.x.x" or "y.y.y.y/n" */
 static int parse_addr(const char *s, in_addr_t *addr,
 	int *plen)
@@ -556,8 +616,13 @@ static void help(void)
 	printf("\nUsage: [OPTIONS] OBJECT CMD [CMD_OPTIONS]" \
 	       "\nOptions: -d -- log level info, -d2 -- debug, -h -- help" \
 	       "\n$ ip link [show [IFACE]]" \
+	       "\n$ ip link add IFACE type bridge" \
+	       "\n$ ip link add IFACE type vlan MASTER_IFACE VLAN_ID" \
+	       "\n$ ip link del IFACE" \
 	       "\n$ ip link set IFACE up|down"
 	       "\n$ ip link set IFACE addr hh:hh:hh:hh:hh:hh" \
+	       "\n$ ip link set IFACE master MASTER" \
+	       "\n$ ip link set IFACE nomaster" \
 	       "\n$ ip addr [show [IFACE]]" \
 	       "\n$ ip addr add|del IFACE ADDR/BITS" \
 	       "\n$ ip route [show [dest ADDR/BITS] [proto PROTO] [type TYPE] [scope SCOPE] [table TABLE] [gw ADDR]]" \
@@ -570,8 +635,8 @@ static void help(void)
 
 int main(int argc, char *argv[])
 {
-	int r = 1, i, logmask;
-	const char *obj, *cmd;
+	int r, i, logmask;
+	const char *obj, *cmd, *iface;
 
 	if (!argv[1] || !strcmp(argv[1], "-h")) {
 		help();
@@ -600,72 +665,110 @@ int main(int argc, char *argv[])
 	setlogmask(logmask);
 
 	if (nlr_init()) {
-		printf("nlroute init failed\n");
+		fprintf(stderr, "nlroute init failed\n");
 		return -1;
 	}
 
 	obj = argv[i];
+	if (!obj) {
+		fprintf(stderr, "Missing object.\n");
+		goto fin;
+	}
+
 	cmd = argv[i + 1];
 	argv = argv + i + 2;
+	if (!cmd) {
+		cmd = "show";
+		argv--;
+	}
+
+	r = 1;
 	if (!strcmp(obj, "link")) {
-		if (!cmd) {
-			r = get_iface_info(NULL);
-		} else if (!strcmp(cmd, "show")) {
+		if (!strcmp(cmd, "show")) {
+			if (argv[0] && argv[1])
+				goto fin;
 			r = get_iface_info(argv[0]);
 		} else if (!strcmp(cmd, "set")) {
-			if (argv[0]) { /* IFACE */
-				if (!strcmp(argv[1], "up"))
-					r = set_iface(argv[0], 1);
-				else if (!strcmp(argv[1], "down"))
-					r = set_iface(argv[0], 0);
-				else if (!strcmp(argv[1], "addr")) {
-					if (argv[2]) {
-						r = set_iface_addr(argv[0],
-						  argv[2]);
-					}
-				}
+			iface = argv[0];
+			if (!iface || !argv[1])
+				goto fin;
+			if (!strcmp(argv[1], "up")) {
+				if (argv[2])
+					goto fin;
+				r = set_iface(iface, 1);
+			} else if (!strcmp(argv[1], "down")) {
+				if (argv[2])
+					goto fin;
+				r = set_iface(iface, 0);
+			} else if (!strcmp(argv[1], "addr")) {
+				if (!argv[2] || argv[3])
+					goto fin;
+				r = set_iface_addr(iface, argv[2]);
+			} else if (!strcmp(argv[1], "master")) {
+				if (!argv[2] || argv[3])
+					goto fin;
+				r = set_iface_master(iface, argv[2]);
+			} else if (!strcmp(argv[1], "nomaster")) {
+				if (argv[2])
+					goto fin;
+				r = set_iface_master(iface, NULL);
 			}
+		} else if (!strcmp(cmd, "add")) {
+			iface = argv[0];
+			if (!iface || !argv[1] || strcmp(argv[1], "type"))
+				goto fin;
+			if (!strcmp(argv[2], "bridge")) {
+				if (argv[3])
+					goto fin;
+				r = add_bridge(iface);
+			} else if (!strcmp(argv[2], "vlan")) {
+				if (!argv[3] || !argv[4])
+					goto fin;
+				r = add_vlan(iface, argv[3], argv[4]);
+			}
+		} else if (!strcmp(cmd, "del")) {
+			iface = argv[0];
+			if (!iface || argv[1])
+				goto fin;
+			r = del_iface(iface);
 		}
 	} else if (!strcmp(obj, "addr")) {
-		if (!cmd) {
-			r = get_addr(NULL);
-		} else if (!strcmp(cmd, "show")) {
+		if (!strcmp(cmd, "show")) {
+			if (!argv[0] && argv[1])
+				goto fin;
 			r = get_addr(argv[0]);
 		} else if (!strcmp(cmd, "add")) {
-			if (argv[0] && argv[1]) {
-				r = add_addr(argv[0], argv[1]);
-			}
+			if (!argv[0] || !argv[1] || argv[2])
+				goto fin;
+			r = add_addr(argv[0], argv[1]);
 		} else if (!strcmp(cmd, "del")) {
-			if (argv[0] && argv[1]) {
-				r = del_addr(argv[0], argv[1]);
-			}
+			if (!argv[0] || !argv[1] || argv[2])
+				goto fin;
+			r = del_addr(argv[0], argv[1]);
 		}
 	} else if (!strcmp(obj, "route")) {
-		if (!cmd) {
-			r = show_routes(NULL);
-		} else if (!strcmp(cmd, "show")) {
+		if (!strcmp(cmd, "show")) {
 			r = show_routes(argv);
 		} else if (!strcmp(cmd, "get")) {
-			if (!argv[1]) {
-				r = get_route(argv[0]);
-			}
+			if (!argv[0] || argv[1])
+				goto fin;
+			r = get_route(argv[0]);
 		} else if (!strcmp(cmd, "add")) {
-			if (argv[0] && !strcmp(argv[1], "via")
-				&& argv[2]) {
-				r = add_route(argv[0], argv[2]);
-			}
+			if (!argv[0] || strcmp(argv[1], "via") || !argv[2] || argv[3])
+				goto fin;
+			r = add_route(argv[0], argv[2]);
 		} else if (!strcmp(cmd, "del")) {
-			if (argv[0] && !strcmp(argv[2], "via")
-				&& argv[2]) {
-				r = del_route(argv[0], argv[2]);
-			}
+			if (!argv[0] || strcmp(argv[2], "via") || !argv[2] || argv[3])
+				goto fin;
+			r = del_route(argv[0], argv[2]);
 		}
 	}
 
-	if (r > 0)
-		help();
-	else
+fin:
+	if (r < 0)
 		printf("%s\n", r ? "Failed" : "Done");
+	else if (r > 0)
+		fprintf(stderr, "Invalid args. See help (-h).\n");
 
 	nlr_fin();
 
