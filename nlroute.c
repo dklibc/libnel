@@ -698,3 +698,131 @@ int nlr_del_route(in_addr_t dest, int dest_plen, in_addr_t gw)
 {
 	return route_do(RTM_DELROUTE, dest, dest_plen, gw);
 }
+
+/*
+ * ip link set dev eth0 master br0
+ * ip link set dev eth0 nomaster
+ *
+ * To delete master, set @master_idx<0.
+ */
+int nlr_set_master(int iface_idx, int master_idx)
+{
+	char buf[128], *p;
+	struct ifinfomsg ifi;
+
+	memset(buf, 0, sizeof(buf));
+
+	p = nlmsg_put_hdr(buf, RTM_NEWLINK, NLM_F_ACK);
+
+	memset(&ifi, 0, sizeof(ifi));
+	ifi.ifi_family = AF_UNSPEC;
+	ifi.ifi_index = iface_idx;
+
+	p = add_hdr(p, &ifi, sizeof(ifi));
+
+	if (master_idx < 0)
+		master_idx = 0;
+	p = add_rta(p, IFLA_MASTER, 4, &master_idx);
+
+	if (nl_send_msg(&nlsock, buf, p - buf))
+		return -1;
+
+	return nl_wait_ack(&nlsock);
+}
+
+/*
+ * ip link add link eth0 name eth0.100 type vlan id 100
+ */
+int nlr_add_vlan(const char *name, int master_idx, int vlan_id)
+{
+	char buf[128], *p;
+	struct ifinfomsg ifi;
+	static const char *vlan_type = "vlan";
+	uint16_t vlan = vlan_id;
+
+	memset(buf, 0, sizeof(buf));
+
+	/* NLM_F_EXCL -- if it exists, do nothing. */
+	p = nlmsg_put_hdr(buf, RTM_NEWLINK,
+		NLM_F_CREATE | NLM_F_EXCL | NLM_F_ACK);
+
+	memset(&ifi, 0, sizeof(ifi));
+	ifi.ifi_family = AF_UNSPEC;
+
+	p = add_hdr(p, &ifi, sizeof(ifi));
+
+	p = add_rta(p, IFLA_LINK, 4, &master_idx);
+	p = add_rta(p, IFLA_IFNAME, strlen(name) + 1, (char *)name);
+	struct rtattr *linkinfo = (struct rtattr *)p;
+	p = add_rta(p, IFLA_LINKINFO, 0, NULL);
+	p = add_rta(p, IFLA_INFO_KIND, strlen(vlan_type), (char *)vlan_type);
+	struct rtattr *linkinfo_data = (struct rtattr *)p;
+	p = add_rta(p, IFLA_INFO_DATA, 0, NULL);
+	p = add_rta(p, IFLA_VLAN_ID, 2, &vlan);
+	linkinfo_data->rta_len = p - (char *)linkinfo_data;
+	linkinfo->rta_len = p - (char *)linkinfo;
+
+	if (nl_send_msg(&nlsock, buf, p - buf))
+		return -1;
+
+	return nl_wait_ack(&nlsock);
+}
+
+/*
+ * ip link add name br0 type bridge
+ */
+int nlr_add_bridge(const char *name)
+{
+	char buf[128], *p;
+	struct ifinfomsg ifi;
+	static const char *bridge_type = "bridge";
+
+	memset(buf, 0, sizeof(buf));
+
+	/* NLM_F_EXCL -- if it exists, do nothing. */
+	p = nlmsg_put_hdr(buf, RTM_NEWLINK,
+		NLM_F_CREATE | NLM_F_EXCL | NLM_F_ACK);
+
+	memset(&ifi, 0, sizeof(ifi));
+	ifi.ifi_family = AF_UNSPEC;
+
+	p = add_hdr(p, &ifi, sizeof(ifi));
+
+	p = add_rta(p, IFLA_IFNAME, strlen(name) + 1, (char *)name);
+	struct rtattr *linkinfo = (struct rtattr *)p;
+	p = add_rta(p, IFLA_LINKINFO, 0, NULL);
+	p = add_rta(p, IFLA_INFO_KIND, strlen(bridge_type),
+		(char *)bridge_type);
+	linkinfo->rta_len = p - (char *)linkinfo;
+
+	if (nl_send_msg(&nlsock, buf, p - buf))
+		return -1;
+
+	return nl_wait_ack(&nlsock);
+
+}
+
+/* ip link del name br0 */
+int nlr_del_iface(int iface_idx)
+{
+	char buf[128], *p;
+	struct ifinfomsg ifi;
+
+	memset(buf, 0, sizeof(buf));
+
+	p = nlmsg_put_hdr(buf, RTM_DELLINK, NLM_F_ACK);
+
+	memset(&ifi, 0, sizeof(ifi));
+	ifi.ifi_family = AF_UNSPEC;
+	ifi.ifi_index = iface_idx;
+
+	p = add_hdr(p, &ifi, sizeof(ifi));
+
+	p = add_rta(p, IFLA_MASTER, 4, &iface_idx);
+
+	if (nl_send_msg(&nlsock, buf, p - buf))
+		return -1;
+
+	return nl_wait_ack(&nlsock);
+}
+

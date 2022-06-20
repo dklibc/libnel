@@ -92,4 +92,10 @@ int nlr_del_route(in_addr_t dest, int dest_plen, in_addr_t gw);
 struct nlr_route *nlr_get_routes(struct nlr_route *filter, int *err);
 void nlr_free_routes(struct nlr_route *r);
 
+int nlr_add_bridge(const char *name);
+int nlr_add_vlan(const char *name, int master_idx, int vlan_id);
+int nlr_del_iface(int iface_idx);
+/* To unset master, set @master_idx<0. */
+int nlr_set_master(int iface_idx, int master_idx);
+
 #endif
