@@ -23,10 +23,15 @@ To debug define environment variable LIBNEL_DEBUG.
 
 For testing libnel-route we've created a simple cmdline util 'ip':
 Usage: [OPTIONS] OBJECT CMD [CMD_OPTIONS].
-Options: -d -- log level info, -d2 -- debug, -h -- help.
+Options: -d -- debugging, -h -- help, -s -- statistics (show verbose info)
   $ ip link [show [IFACE]]
   $ ip link set IFACE up|down
   $ ip link set IFACE addr hh:hh:hh:hh:hh:hh
+  $ ip link set IFACE master MASTER_IFACE
+  $ ip link set IFACE nomaster
+  $ ip link add IFACE type bridge
+  $ ip link add IFACE type vlan LINK_IFACE VLAN_ID
+  $ ip link del IFACE 
   $ ip addr [show [IFACE]]
   $ ip addr add|del IFACE ADDR/BITS
   $ ip route [show [dest ADDR/BITS] [proto PROTO] [type TYPE] [scope SCOPE]
