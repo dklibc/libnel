@@ -80,13 +80,10 @@ static int iface_cb(struct nlmsghdr *nlhdr, void *_priv)
 	struct iface_cb_priv *priv = (struct iface_cb_priv *)_priv;
 	struct nlattr *nla;
 	int n, type;
-	struct genlmsghdr *genlhdr;
 	struct nl80211_iface iface, *p;
 
 	if (!nlhdr || priv->err)
 		return 0;
-
-	genlhdr = GENLMSG_HDR(nlhdr);
 
 	memset(&iface, 0, sizeof(iface));
 	iface.idx = -1;

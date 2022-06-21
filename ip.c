@@ -157,7 +157,7 @@ static int del_addr(const char *iface, const char *addr)
 static int get_addr(const char *iface)
 {
 	int iface_idx = -1, err;
-	char buf[32], *name;
+	char *name;
 	struct in_addr in;
 	struct nlr_addr *addr, *p;
 
@@ -339,7 +339,6 @@ static int code_names_qsort_cmp(const void *p1, const void *p2)
 static char **code_names(const char *t[], int n)
 {
 	char **r;
-	int i;
 
 	r = malloc((n + 1) * sizeof(t[0]));
 	if (!r)

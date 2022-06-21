@@ -71,7 +71,6 @@ static int service_id_cb(struct nlmsghdr *nlhdr, void *_priv)
 int genl_service_id(struct nl_sock *nlsock, const char *name)
 {
 	char buf[128], *p;
-	struct genlmsghdr genlhdr;
 	struct service_id_cb_priv priv;
 
 	p = nlmsg_put_hdr(buf, GENL_ID_CTRL, 0);
