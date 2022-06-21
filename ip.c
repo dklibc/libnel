@@ -193,8 +193,13 @@ static int get_addr(const char *iface)
 const char *nlr_iface_type2str(enum nlr_iface_type type)
 {
 	static const char *t[] = {
-		[NLR_IFACE_LOOPBACK] = "loopback",
-		[NLR_IFACE_ETHER] = "ethernet",
+		[NLR_IFACE_TYPE_LOOPBACK] = "loopback",
+		[NLR_IFACE_TYPE_ETHERNET] = "ethernet",
+		[NLR_IFACE_TYPE_WIRELESS] = "wireless",
+		[NLR_IFACE_TYPE_BRIDGE] = "bridge",
+		[NLR_IFACE_TYPE_VLAN] = "vlan",
+		[NLR_IFACE_TYPE_BONDING] = "bonding",
+		[NLR_IFACE_TYPE_TUNNEL] = "tunnel",
 	};
 	static char buf[32];
 

@@ -11,14 +11,14 @@ void nlr_fin(void);
 int nlr_iface_idx(const char *name);
 char *nlr_iface_name(int idx);
 
-/*
- * See "/usr/include/linux/if_arp.h".
- * NOTE: bridge iface and vlan iface has type "ethernet".
- */
 enum nlr_iface_type {
-	NLR_IFACE_ETHER = 1,
-	NLR_IFACE_LOOPBACK = 772,
-	NLR_IFACE_WIRELESS = 801,
+	NLR_IFACE_TYPE_ETHERNET = 0,
+	NLR_IFACE_TYPE_LOOPBACK,
+	NLR_IFACE_TYPE_WIRELESS,
+	NLR_IFACE_TYPE_BRIDGE,
+	NLR_IFACE_TYPE_VLAN,
+	NLR_IFACE_TYPE_TUNNEL,
+	NLR_IFACE_TYPE_BONDING,
 };
 
 struct nlr_iface {
@@ -40,6 +40,9 @@ struct nlr_iface {
 	IMPORTANT: in Cisco VLAN iface is a subinterface, not an independent
 	interface.
 	*/
+	union {
+		int vlan_id;
+	} options;
 	struct {
 		long tx_bytes, tx_packets;
 		long rx_bytes, rx_packets;

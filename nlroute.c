@@ -18,6 +18,7 @@
 #include <net/if.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
+#include <linux/if_arp.h>
 
 #include "nlcore.h"
 #include "nlroute.h"
@@ -192,13 +193,28 @@ void nlr_iface_free(struct nlr_iface *iface)
 	}
 }
 
-#define IFF_LOWER_UP (1<<16)
+//#define IFF_LOWER_UP (1<<16)
 
 struct iface_cb_priv {
 	struct nlr_iface *iface;
 	int iface_idx;
 	int err;
 };
+
+static int ifi_type2nlr_iface_type(int ifi_type)
+{
+	switch(ifi_type) {
+	case ARPHRD_ETHER:
+		return NLR_IFACE_TYPE_ETHERNET;
+	case ARPHRD_LOOPBACK:
+		return NLR_IFACE_TYPE_LOOPBACK;
+	case ARPHRD_IEEE80211:
+		return NLR_IFACE_TYPE_WIRELESS;
+	default:
+		DEBUG("unknown iface type: %d.", ifi_type);
+		return -1; /* Unknown */
+	}
+}
 
 static int iface_cb(struct nlmsghdr *nlhdr, void *_priv)
 {
@@ -225,7 +241,7 @@ static int iface_cb(struct nlmsghdr *nlhdr, void *_priv)
 	}
 
 	iface->idx = ifi->ifi_index;
-	iface->type = ifi->ifi_type;
+	iface->type = ifi_type2nlr_iface_type(ifi->ifi_type);
 	iface->is_up = ifi->ifi_flags & IFF_UP;
 	iface->carrier_on = ifi->ifi_flags & IFF_LOWER_UP;
 	iface->mtu = -1;
@@ -250,6 +266,36 @@ static int iface_cb(struct nlmsghdr *nlhdr, void *_priv)
 			iface->master_idx = *(int *)RTA_DATA(rta);
 		} else if (rta->rta_type == IFLA_LINK) {
 			iface->link_idx = *(int *)RTA_DATA(rta);
+		} else if (rta->rta_type == IFLA_LINKINFO) {
+			int m;
+			struct rtattr *rta2;
+			for (rta2 = RTA_DATA(rta), m = RTA_PAYLOAD(rta);
+				RTA_OK(rta2, m); rta2 = RTA_NEXT(rta2, m)) {
+				if (rta2->rta_type == IFLA_INFO_KIND) {
+					char kind[32];
+					int l = RTA_PAYLOAD(rta2);
+					if (l > sizeof(kind) + 1) {
+						DEBUG("IFLA_INFO_KIND payload is greater then our static buffer");
+						continue;
+					}
+					memcpy(kind, RTA_DATA(rta2), l);
+					kind[l] = '\0';
+					if (!strcmp(kind, "bridge"))
+						iface->type =
+							NLR_IFACE_TYPE_BRIDGE;
+					else if (!strcmp(kind, "vlan"))
+						iface->type =
+							NLR_IFACE_TYPE_VLAN;
+					else if (!strcmp(kind, "tun"))
+						iface->type =
+							NLR_IFACE_TYPE_TUNNEL;
+					else if (!strcmp(kind, "bond"))
+						iface->type =
+							NLR_IFACE_TYPE_BONDING;
+				} else if (rta2->rta_type == IFLA_INFO_DATA) {
+					/* TODO: get VLAN id */
+				}
+			}
 		}
 	}
 
