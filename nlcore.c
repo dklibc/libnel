@@ -172,15 +172,26 @@ int nl_send_msg(struct nl_sock *nlsock, char *buf, int len)
 int nl_recv_msg(struct nl_sock *nlsock, int type, int (*cb)(struct nlmsghdr *, void *),
 		void *cb_priv)
 {
-	struct sockaddr_nl sa;
-	int n;
-	char buf[4096];
+	ssize_t n;
+	char *buf;
 	struct nlmsghdr *nlhdr;
 	struct nlmsgerr *errmsg;
 
 	while (1) {
-		n = sizeof(sa);
-		n = recvfrom(nlsock->sock, buf, sizeof(buf), 0, (struct sockaddr *)&sa, &n);
+		n = recv(nlsock->sock, NULL, 0, MSG_PEEK|MSG_TRUNC);
+		if (n < 0) {
+			if (errno == EINTR || errno == EAGAIN)
+				continue;
+			ERRNO("failed to recv");
+			goto err;
+		}
+
+		DEBUG("prepare to recv %d bytes", n);
+		buf = malloc(n);
+		if (!buf)
+			return -1;
+
+		n = recv(nlsock->sock, buf, n, 0);
 		if (n < 0) {
 			if (errno == EINTR || errno == EAGAIN)
 				continue;
@@ -196,11 +207,13 @@ int nl_recv_msg(struct nl_sock *nlsock, int type, int (*cb)(struct nlmsghdr *, v
 			if (nlhdr->nlmsg_type == NLMSG_ERROR) {
 				errmsg = NLMSG_DATA(nlhdr);
 				DEBUG("err msg: error=%d", errmsg->error);
+				free(buf);
 				return -1;
 			}
 
 			if (nlhdr->nlmsg_type == NLMSG_DONE) {
 				DEBUG("done msg");
+				free(buf);
 				return cb(NULL, cb_priv);
 			}
 
@@ -214,12 +227,16 @@ int nl_recv_msg(struct nl_sock *nlsock, int type, int (*cb)(struct nlmsghdr *, v
 
 			if (!(nlhdr->nlmsg_flags & NLM_F_MULTI)) {
 				DEBUG("msg with unset 'multi' flag");
+				free(buf);
 				return cb(NULL, cb_priv);
 			}
 		}
+
+		free(buf);
 	}
 
 err:
+	free(buf);
 	nl_open(nlsock, nlsock->service);
 	return -1;
 }
